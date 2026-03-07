@@ -1,0 +1,103 @@
+ACE Pro GD32F303CCT6 USB support for Klipper
+=============================================
+Adds MACH_STM32F103xC config variant (256KiB flash / 48KiB RAM) for
+GD32F303CC/CD/CE "HD" parts, fixes USB enumeration by driving the
+external D+ pullup on PB9 and adding a tSTARTUP delay after clearing
+FRES, and patches the asyncio deprecation in flash_can.py for Python 3.14+.
+
+Apply to a fresh Klipper clone:
+  git clone https://github.com/Klipper3d/klipper.git
+  cd klipper
+  git apply ../klipper-ace-gd32f303.patch
+
+Build with menuconfig:
+  STM32 → STM32F103 → 256KiB Flash / 48KiB RAM
+  USB communication, 32KiB bootloader offset (0x08008000) for Katapult
+
+diff --git a/lib/canboot/flash_can.py b/lib/canboot/flash_can.py
+index b78770977..d672a4021 100755
+--- a/lib/canboot/flash_can.py
++++ b/lib/canboot/flash_can.py
+@@ -586,7 +586,8 @@ def main():
+         logging.getLogger().setLevel(logging.ERROR)
+     intf = args.interface
+     fpath = pathlib.Path(args.firmware).expanduser().resolve()
+-    loop = asyncio.get_event_loop()
++    loop = asyncio.new_event_loop()
++    asyncio.set_event_loop(loop)
+     iscan = args.device is None
+     sock = None
+     try:
+diff --git a/src/stm32/Kconfig b/src/stm32/Kconfig
+index c8466df38..ca4ed4378 100644
+--- a/src/stm32/Kconfig
++++ b/src/stm32/Kconfig
+@@ -117,6 +117,10 @@ config MACH_STM32F103x6
+     depends on LOW_LEVEL_OPTIONS && MACH_STM32F103
+     bool "Only 10KiB of RAM (for rare stm32f103x6 variant)"
+ 
++config MACH_STM32F103xC
++    depends on LOW_LEVEL_OPTIONS && MACH_STM32F103
++    bool "256KiB Flash / 48KiB RAM (STM32F103xC/xD/xE or GD32F303CC/CD/CE)"
++
+ config MACH_STM32F070x6
+     depends on LOW_LEVEL_OPTIONS && MACH_STM32F070
+     bool "Only 6KiB of RAM (for rare stm32f070x6 variant)"
+@@ -221,6 +225,7 @@ config FLASH_SIZE
+     hex
+     default 0x8000 if MACH_STM32F031 || MACH_STM32F042 || MACH_STM32F070x6
+     default 0x20000 if (MACH_STM32F070 || MACH_STM32F072) && !MACH_STM32F070x6
++    default 0x40000 if MACH_STM32F103xC # Flash size for STM32F103xC / GD32F303CC (256KiB)
+     default 0x10000 if MACH_STM32F103 || MACH_STM32L412 # Flash size of stm32f103x8 (64KiB)
+     default 0x40000 if MACH_STM32F2 || MACH_STM32F401 || MACH_STM32H723
+     default 0x80000 if MACH_STM32F4x5 || MACH_STM32F446
+@@ -245,6 +250,7 @@ config RAM_SIZE
+     default 0x1800 if MACH_STM32F070x6
+     default 0x4000 if (MACH_STM32F070 || MACH_STM32F072) && !MACH_STM32F070x6
+     default 0x2800 if MACH_STM32F103x6
++    default 0xC000 if MACH_STM32F103xC # RAM size for STM32F103xC / GD32F303CC (48KiB)
+     default 0x5000 if MACH_STM32F103 && !MACH_STM32F103x6 # Ram size of stm32f103x8
+     default 0x8000 if MACH_STM32G431
+     default 0x20000 if MACH_STM32G474
+diff --git a/src/stm32/usbfs.c b/src/stm32/usbfs.c
+index 3751a4f5a..38da7c53c 100644
+--- a/src/stm32/usbfs.c
++++ b/src/stm32/usbfs.c
+@@ -442,6 +442,11 @@ usb_init(void)
+     // Enable USB clock
+     enable_pclock(USB_BASE);
+ 
++    // PA11/PA12: leave as floating input (reset default, cfg=0x4).
++    // On GD32F303 the USB transceiver connects to PA11/PA12 internally
++    // regardless of GPIO mode. Enabling the AF push-pull output driver
++    // conflicts with the USB differential driver and prevents enumeration.
++
+     // Setup USB packet memory
+     btable_configure();
+ 
+@@ -450,11 +455,23 @@ usb_init(void)
+     USB->BCDR = USB_BCDR_DPPU;
+ #endif
+ 
+-    // Reset usb controller and enable interrupts
++    // ACE/GD32F303: External D+ pullup controlled by PB9
++    // (transistor + 1.5kΩ to D+). Drive PB9 low during init; set high later.
++    gpio_out_setup(GPIO('B', 9), 0);
++
++    // Initialize USB peripheral (CNTR resets to FRES|PDWN after enable_pclock)
++    // Step 1: Clear PDWN to power up the USB transceiver, keep FRES active
+     USB->CNTR = USB_CNTR_FRES;
+-    USB->DADDR = 0;
++    // Step 2: Wait for transceiver startup (tSTARTUP >= 1µs per reference manual;
++    //         GD32F303 may need longer than genuine STM32F103)
++    udelay(10);
++    // Step 3: Clear FRES and enable USB-reset interrupt.
++    //         DADDR.EF is set later in usb_reset() on first host reset.
+     USB->CNTR = USB_CNTR_RESETM;
+     USB->ISTR = 0;
+     armcm_enable_irq(USB_IRQHandler, USBx_IRQn, 1);
++
++    // ACE/GD32F303: Enable external D+ pullup via PB9
++    gpio_out_setup(GPIO('B', 9), 1);
+ }
+ DECL_INIT(usb_init);

@@ -1,0 +1,10 @@
+out/
+*.o
+*.elf
+*.bin
+!klipper.bin
+*.pyc
+__pycache__/
+.config
+!klipper.config
+.config.old
