@@ -1,5 +1,22 @@
 # ACEPRO Klipper MCU — Patched Klipper for GD32F303
 
+> **🚧 IMPORTANT — THIS IS NOT A FUNCTIONAL ACE PRO INTEGRATION**
+>
+> This repository **only** enables running Klipper firmware on the ACE Pro MCU
+> hardware. It does **not** include any Klipper extras module, plugin, or
+> configuration to actually operate the ACE Pro (filament slots, hub motor,
+> sensors, etc.).
+>
+> **Without a dedicated Klipper extras module to drive it, the ACE Pro will be
+> completely non-functional — effectively a very expensive brick.** No such
+> module exists yet.
+>
+> **Only use this if you intend to develop the missing Klipper integration
+> yourself.** If you just want your ACE Pro to work with Klipper, this repository
+> is not what you are looking for.
+
+---
+
 > **⚠️ WARNING — READ BEFORE PROCEEDING**
 >
 > This repository contains patches and tools to run **Klipper** firmware on the
